@@ -7,7 +7,7 @@ import time
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Técnico CICLA", page_icon="🔧", layout="centered")
 
-# --- CONEXIÓN A GOOGLE SHEETS ---
+# --- CONEXIÓN BLINDADA ---
 @st.cache_resource
 def conectar_google_sheet():
     scopes = [
@@ -71,7 +71,7 @@ if buscar or numero_caso:
             st.info(f"📂 Caso: {id_buscado} | Cliente: {datos_ticket.get('Nombre del Cliente:', '---')}")
 
             with st.form("form_tecnico"):
-                # --- SECCIÓN 1: ESTADO ---
+                # --- ESTADO ---
                 estados = ["Ingresado", "En Revisión", "Presupuesto/Diagnóstico Enviado", 
                            "Esperando Repuestos", "En Mantención", "Listo para Retiro", "Entregado"]
                 
@@ -80,38 +80,53 @@ if buscar or numero_caso:
                 nuevo_estado = st.selectbox("Estado del Equipo", estados, index=idx_estado)
 
                 st.markdown("---")
+                st.markdown("### 💰 Repuestos y Costos")
                 
-                # --- SECCIÓN 2: DESGLOSE DE COSTOS ---
-                st.markdown("### 💰 Costos y Presupuesto")
+                # --- SECCIÓN REPUESTOS (CON DETALLE) ---
+                # Fila 1: Cicla
+                c_rep_cicla_val, c_rep_cicla_txt = st.columns([1, 2])
+                with c_rep_cicla_val:
+                    v_rep_cicla = st.number_input("Valor Rep. CICLA ($)", min_value=0, step=1000)
+                with c_rep_cicla_txt:
+                    d_rep_cicla = st.text_input("Detalle Repuestos CICLA", placeholder="Ej: 1x Boquilla, 1x Ventilador...")
+
+                # Fila 2: Externos
+                c_rep_ext_val, c_rep_ext_txt = st.columns([1, 2])
+                with c_rep_ext_val:
+                    v_rep_ext = st.number_input("Valor Rep. EXTERNOS ($)", min_value=0, step=1000)
+                with c_rep_ext_txt:
+                    d_rep_ext = st.text_input("Detalle Repuestos EXTERNOS", placeholder="Ej: Compra en Casa Royal...")
+
+                st.markdown("---")
                 
-                # Intentamos recuperar el costo anterior si existe
+                # --- SECCIÓN MANO DE OBRA ---
+                st.markdown("### 🛠️ Mano de Obra")
+                
+                # Recuperar costo previo para no perderlo
                 costo_previo_str = str(datos_ticket.get('Costo', '0')).replace('$','').replace('.','')
                 try: costo_previo = int(costo_previo_str)
                 except: costo_previo = 0
-
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    v_repuestos = st.number_input("Repuestos ($)", min_value=0, step=1000, help="Valor de las piezas")
-                with c2:
-                    v_mantencion = st.number_input("Mantenimiento ($)", min_value=0, step=1000, help="Limpieza y ajuste")
-                with c3:
-                    # Ponemos el costo previo aquí por defecto para no perderlo si no desglosan
-                    v_reparacion = st.number_input("Reparación ($)", value=costo_previo, min_value=0, step=1000, help="Mano de obra compleja")
-
-                # CÁLCULO AUTOMÁTICO DEL TOTAL
-                total_calculado = v_repuestos + v_mantencion + v_reparacion
                 
-                # Mostrar el total en grande y bonito
-                st.metric(label="💵 TOTAL FINAL A COBRAR", value=f"${total_calculado:,.0f}")
+                c_man1, c_man2 = st.columns(2)
+                with c_man1:
+                    v_mantencion = st.number_input("Mantenimiento ($)", min_value=0, step=1000)
+                with c_man2:
+                    v_reparacion = st.number_input("Reparación ($)", value=costo_previo, min_value=0, step=1000)
+
+                # CÁLCULO TOTAL
+                total_calculado = v_rep_cicla + v_rep_ext + v_mantencion + v_reparacion
+                st.metric(label="💵 TOTAL A COBRAR", value=f"${total_calculado:,.0f}")
 
                 st.markdown("---")
 
-                # --- SECCIÓN 3: TEXTOS ---
-                nuevo_diag = st.text_area("Diagnóstico Técnico", value=str(datos_ticket.get('Diagnostico Final', '')))
+                # --- INFORMES TÉCNICOS ---
+                st.markdown("### 📋 Informe Técnico")
                 
-                # Aquí guardaremos el detalle de los repuestos y costos
-                texto_repuestos_previo = str(datos_ticket.get('Repuestos', ''))
-                nuevo_repuestos_desc = st.text_area("Detalle de Repuestos / Notas", value=texto_repuestos_previo)
+                # Carga el diagnóstico existente
+                diag_previo = str(datos_ticket.get('Diagnostico Final', ''))
+                
+                nuevo_diag = st.text_area("Diagnóstico Inicial / Problema Reportado", value=diag_previo, height=100)
+                detalle_tecnico = st.text_area("Detalle del Trabajo Realizado (Técnico)", placeholder="Describe aquí la solución técnica aplicada...", height=100)
 
                 st.markdown("---")
                 avisar = st.checkbox("📧 Enviar notificación al cliente", value=True)
@@ -122,15 +137,29 @@ if buscar or numero_caso:
                 msg.info("⏳ Guardando...")
                 
                 try:
-                    # Crear un texto resumen del desglose para guardarlo en la columna "Repuestos"
-                    # Así queda constancia de cuánto fue cada cosa.
-                    desglose_texto = f"{nuevo_repuestos_desc} | (Desglose: Repuestos ${v_repuestos} + Mantención ${v_mantencion} + Reparación ${v_reparacion})"
+                    # 1. Construir el Texto de Repuestos (Columna M)
+                    # Formato: [CICLA: detalle ($val)] | [EXT: detalle ($val)]
+                    texto_repuestos = ""
+                    if v_rep_cicla > 0 or d_rep_cicla:
+                        texto_repuestos += f"CICLA: {d_rep_cicla} (${v_rep_cicla}) "
+                    if v_rep_ext > 0 or d_rep_ext:
+                        if texto_repuestos: texto_repuestos += "| "
+                        texto_repuestos += f"EXTERNO: {d_rep_ext} (${v_rep_ext}) "
+                    
+                    # Agregamos desglose de mano de obra al final para registro interno
+                    texto_repuestos += f"| [MO: Mant ${v_mantencion} + Rep ${v_reparacion}]"
+
+                    # 2. Construir el Informe Técnico (Columna L)
+                    # Si el técnico escribió algo nuevo, lo agregamos al diagnóstico
+                    texto_informe = nuevo_diag
+                    if detalle_tecnico:
+                        texto_informe += f"\n\n--- TRABAJO REALIZADO ---\n{detalle_tecnico}"
 
                     # Actualizamos celdas
-                    hoja.update_cell(num_fila_excel, 11, nuevo_estado)      # Estado
-                    hoja.update_cell(num_fila_excel, 12, nuevo_diag)        # Diagnóstico
-                    hoja.update_cell(num_fila_excel, 13, desglose_texto)    # Repuestos (Con el desglose escrito)
-                    hoja.update_cell(num_fila_excel, 14, total_calculado)   # Costo Total (Numérico)
+                    hoja.update_cell(num_fila_excel, 11, nuevo_estado)      # Col K (Estado)
+                    hoja.update_cell(num_fila_excel, 12, texto_informe)     # Col L (Diagnóstico + Informe)
+                    hoja.update_cell(num_fila_excel, 13, texto_repuestos)   # Col M (Detalle Repuestos)
+                    hoja.update_cell(num_fila_excel, 14, total_calculado)   # Col N (Total $)
                     
                     if avisar:
                         hoja.update_cell(num_fila_excel, 15, "NOTIFICAR")
