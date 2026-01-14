@@ -7,51 +7,37 @@ import time
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Técnico CICLA", page_icon="🔧", layout="centered")
 
-# --- CONEXIÓN BLINDADA (MOTOR MODERNO) ---
+# --- CONEXIÓN A GOOGLE SHEETS ---
 @st.cache_resource
 def conectar_google_sheet():
-    # Permisos necesarios
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     
-    # 1. INTENTO CON SECRETS (NUBE)
     if "gcp_service_account" in st.secrets:
         creds_dict = dict(st.secrets["gcp_service_account"])
-        
-        # Parche automático para la clave privada (arregla los \n)
         if "private_key" in creds_dict:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-        
-        # Conexión usando la librería nueva (google-auth)
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    
-    # 2. INTENTO CON ARCHIVO LOCAL (PC - Por si acaso)
     else:
         creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
             
     client = gspread.authorize(creds)
-    
-    # ✅ CONEXIÓN POR ID (Tu archivo "Ficha Recepción...")
     ID_ARCHIVO = "1xcATaxfbrREwp83kQ5eGr_cjG8V2GElEF7JZD7puK9E"
-    
     return client.open_by_key(ID_ARCHIVO).sheet1
 
-# --- VALIDACIÓN DE CONEXIÓN ---
+# --- VALIDACIÓN ---
 try:
     hoja = conectar_google_sheet()
 except Exception as e:
     st.error("❌ ERROR DE CONEXIÓN")
     st.error(f"Detalle: {e}")
-    st.info("⚠️ IMPORTANTE: ¿Compartiste la hoja de Excel con el correo del robot?")
-    st.code("bot-cicla@indigo-gecko-483802-u5.iam.gserviceaccount.com")
     st.stop()
 
-# --- INTERFAZ GRÁFICA ---
+# --- INTERFAZ ---
 st.title("🔧 Gestión Taller CICLA 3D")
 
-# Recibir ID por URL o Manual
 param_id = st.query_params.get("id", None)
 
 if not param_id:
@@ -64,7 +50,7 @@ else:
     numero_caso = param_id
     buscar = True
 
-# --- LÓGICA DEL FORMULARIO ---
+# --- PROCESAMIENTO ---
 if buscar or numero_caso:
     id_buscado = f"CASO-{int(numero_caso)}"
     
@@ -72,38 +58,60 @@ if buscar or numero_caso:
         datos = hoja.get_all_records()
         df = pd.DataFrame(datos)
         
-        # Verificar columna ID
         if 'ID_TICKET' not in df.columns:
-            st.error("⚠️ Error: No encuentro la columna 'ID_TICKET' en el Excel.")
+            st.error("⚠️ Error: No encuentro la columna 'ID_TICKET'.")
             st.stop()
             
         fila_encontrada = df[df['ID_TICKET'] == id_buscado]
 
         if not fila_encontrada.empty:
-            # Calcular fila real en Excel (+2 por header e índice 0)
             num_fila_excel = int(fila_encontrada.index[0] + 2)
             datos_ticket = fila_encontrada.iloc[0]
 
             st.info(f"📂 Caso: {id_buscado} | Cliente: {datos_ticket.get('Nombre del Cliente:', '---')}")
 
             with st.form("form_tecnico"):
+                # --- SECCIÓN 1: ESTADO ---
                 estados = ["Ingresado", "En Revisión", "Presupuesto/Diagnóstico Enviado", 
                            "Esperando Repuestos", "En Mantención", "Listo para Retiro", "Entregado"]
                 
                 estado_actual = datos_ticket.get('Estado', 'Ingresado')
                 idx_estado = estados.index(estado_actual) if estado_actual in estados else 0
+                nuevo_estado = st.selectbox("Estado del Equipo", estados, index=idx_estado)
 
-                nuevo_estado = st.selectbox("Estado", estados, index=idx_estado)
+                st.markdown("---")
                 
-                col_costo, _ = st.columns(2)
-                with col_costo:
-                    costo_str = str(datos_ticket.get('Costo', '0')).replace('$','').replace('.','')
-                    try: val_costo = int(costo_str)
-                    except: val_costo = 0
-                    nuevo_costo = st.number_input("Costo Total ($)", value=val_costo, step=1000)
+                # --- SECCIÓN 2: DESGLOSE DE COSTOS ---
+                st.markdown("### 💰 Costos y Presupuesto")
+                
+                # Intentamos recuperar el costo anterior si existe
+                costo_previo_str = str(datos_ticket.get('Costo', '0')).replace('$','').replace('.','')
+                try: costo_previo = int(costo_previo_str)
+                except: costo_previo = 0
 
-                nuevo_diag = st.text_area("Diagnóstico", value=str(datos_ticket.get('Diagnostico Final', '')))
-                nuevo_repuestos = st.text_area("Repuestos", value=str(datos_ticket.get('Repuestos', '')))
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    v_repuestos = st.number_input("Repuestos ($)", min_value=0, step=1000, help="Valor de las piezas")
+                with c2:
+                    v_mantencion = st.number_input("Mantenimiento ($)", min_value=0, step=1000, help="Limpieza y ajuste")
+                with c3:
+                    # Ponemos el costo previo aquí por defecto para no perderlo si no desglosan
+                    v_reparacion = st.number_input("Reparación ($)", value=costo_previo, min_value=0, step=1000, help="Mano de obra compleja")
+
+                # CÁLCULO AUTOMÁTICO DEL TOTAL
+                total_calculado = v_repuestos + v_mantencion + v_reparacion
+                
+                # Mostrar el total en grande y bonito
+                st.metric(label="💵 TOTAL FINAL A COBRAR", value=f"${total_calculado:,.0f}")
+
+                st.markdown("---")
+
+                # --- SECCIÓN 3: TEXTOS ---
+                nuevo_diag = st.text_area("Diagnóstico Técnico", value=str(datos_ticket.get('Diagnostico Final', '')))
+                
+                # Aquí guardaremos el detalle de los repuestos y costos
+                texto_repuestos_previo = str(datos_ticket.get('Repuestos', ''))
+                nuevo_repuestos_desc = st.text_area("Detalle de Repuestos / Notas", value=texto_repuestos_previo)
 
                 st.markdown("---")
                 avisar = st.checkbox("📧 Enviar notificación al cliente", value=True)
@@ -114,11 +122,15 @@ if buscar or numero_caso:
                 msg.info("⏳ Guardando...")
                 
                 try:
-                    # Actualizar celdas (K=11, L=12, M=13, N=14, O=15)
-                    hoja.update_cell(num_fila_excel, 11, nuevo_estado)
-                    hoja.update_cell(num_fila_excel, 12, nuevo_diag)
-                    hoja.update_cell(num_fila_excel, 13, nuevo_repuestos)
-                    hoja.update_cell(num_fila_excel, 14, nuevo_costo)
+                    # Crear un texto resumen del desglose para guardarlo en la columna "Repuestos"
+                    # Así queda constancia de cuánto fue cada cosa.
+                    desglose_texto = f"{nuevo_repuestos_desc} | (Desglose: Repuestos ${v_repuestos} + Mantención ${v_mantencion} + Reparación ${v_reparacion})"
+
+                    # Actualizamos celdas
+                    hoja.update_cell(num_fila_excel, 11, nuevo_estado)      # Estado
+                    hoja.update_cell(num_fila_excel, 12, nuevo_diag)        # Diagnóstico
+                    hoja.update_cell(num_fila_excel, 13, desglose_texto)    # Repuestos (Con el desglose escrito)
+                    hoja.update_cell(num_fila_excel, 14, total_calculado)   # Costo Total (Numérico)
                     
                     if avisar:
                         hoja.update_cell(num_fila_excel, 15, "NOTIFICAR")
@@ -126,7 +138,7 @@ if buscar or numero_caso:
                     else:
                         hoja.update_cell(num_fila_excel, 15, "")
 
-                    msg.success("✅ ¡Guardado con éxito!")
+                    msg.success(f"✅ ¡Guardado! Total: ${total_calculado:,.0f}")
                     time.sleep(1.5)
                     st.rerun()
                     
@@ -137,4 +149,4 @@ if buscar or numero_caso:
             st.warning(f"🔍 No existe el ticket {id_buscado}")
             
     except Exception as e:
-        st.error(f"Error leyendo datos: {e}")
+        st.error(f"Error: {e}")
