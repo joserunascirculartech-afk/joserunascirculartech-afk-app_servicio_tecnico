@@ -71,7 +71,7 @@ except Exception as e:
 
 # --- INTERFAZ ---
 st.title("🔧 Gestión Taller CICLA 3D")
-st.caption("Modo Administrador - Acceso Autorizado ✅")
+st.caption("Bienvenido Nicolas - Acceso Autorizado ✅")
 
 param_id = st.query_params.get("id", None)
 
