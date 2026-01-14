@@ -5,49 +5,37 @@ from google.oauth2.service_account import Credentials
 import time
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Técnico CICLA", page_icon="🔐", layout="centered")
+st.set_page_config(page_title="Técnico CICLA", page_icon="🔧", layout="centered")
 
 # ==========================================
-# 🔐 SISTEMA DE LOGIN (CANDADO DE SEGURIDAD)
+# 🔐 SISTEMA DE LOGIN
 # ==========================================
 def check_password():
-    """Retorna True si el usuario ingresó la clave correcta."""
-    
-    # Si ya ingresó la clave antes, lo dejamos pasar
     if st.session_state.get("password_correct", False):
         return True
 
-    # Interfaz del Login
     st.markdown("### 🔐 Acceso Restringido - Taller CICLA")
     password_input = st.text_input("Ingrese Clave de Técnico", type="password")
     
     if st.button("Entrar"):
-        # 1. Buscamos la clave en los Secrets, si no existe usamos "admin" por defecto
         clave_real = st.secrets.get("password_tecnico", "admin")
-        
         if password_input == clave_real:
             st.session_state["password_correct"] = True
-            st.rerun()  # Recargamos la página para mostrar el contenido
+            st.rerun()
         else:
             st.error("❌ Clave incorrecta")
-
     return False
 
-# 🛑 SI NO TIENE CLAVE, PARAMOS AQUÍ
 if not check_password():
     st.stop()
 
 # ==========================================
-# 🚀 APLICACIÓN PRINCIPAL (SOLO SI TIENE CLAVE)
+# 🚀 APLICACIÓN PRINCIPAL
 # ==========================================
 
-# --- CONEXIÓN BLINDADA ---
 @st.cache_resource
 def conectar_google_sheet():
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
     if "gcp_service_account" in st.secrets:
         creds_dict = dict(st.secrets["gcp_service_account"])
@@ -61,7 +49,6 @@ def conectar_google_sheet():
     ID_ARCHIVO = "1xcATaxfbrREwp83kQ5eGr_cjG8V2GElEF7JZD7puK9E"
     return client.open_by_key(ID_ARCHIVO).sheet1
 
-# --- VALIDACIÓN DE CONEXIÓN ---
 try:
     hoja = conectar_google_sheet()
 except Exception as e:
@@ -69,9 +56,7 @@ except Exception as e:
     st.error(f"Detalle: {e}")
     st.stop()
 
-# --- INTERFAZ ---
 st.title("🔧 Gestión Taller CICLA 3D")
-st.caption("Bienvenido Nicolas - Acceso Autorizado ✅")
 
 param_id = st.query_params.get("id", None)
 
@@ -85,7 +70,6 @@ else:
     numero_caso = param_id
     buscar = True
 
-# --- PROCESAMIENTO ---
 if buscar or numero_caso:
     id_buscado = f"CASO-{int(numero_caso)}"
     
@@ -106,35 +90,34 @@ if buscar or numero_caso:
             st.info(f"📂 Caso: {id_buscado} | Cliente: {datos_ticket.get('Nombre del Cliente:', '---')}")
 
             with st.form("form_tecnico"):
-                # --- ESTADO ---
+                # --- CORRECCIÓN INTELIGENTE DE ESTADO ---
                 estados = ["Ingresado", "En Revisión", "Presupuesto/Diagnóstico Enviado", 
                            "Esperando Repuestos", "En Mantención", "Listo para Retiro", "Entregado"]
                 
-                estado_actual = datos_ticket.get('Estado', 'Ingresado')
-                idx_estado = estados.index(estado_actual) if estado_actual in estados else 0
+                # Leemos lo que hay en Excel
+                raw_estado = str(datos_ticket.get('Estado', '')).strip()
+                
+                # SI ESTÁ VACÍO (Nuevo caso) -> Asumimos "Ingresado"
+                if raw_estado == "" or raw_estado not in estados:
+                    estado_actual = "Ingresado"
+                else:
+                    estado_actual = raw_estado
+                
+                idx_estado = estados.index(estado_actual)
                 nuevo_estado = st.selectbox("Estado del Equipo", estados, index=idx_estado)
 
                 st.markdown("---")
                 st.markdown("### 💰 Repuestos y Costos")
                 
-                # --- SECCIÓN REPUESTOS (CON DETALLE) ---
-                # Fila 1: Cicla
                 c_rep_cicla_val, c_rep_cicla_txt = st.columns([1, 2])
-                with c_rep_cicla_val:
-                    v_rep_cicla = st.number_input("Valor Rep. CICLA ($)", min_value=0, step=1000)
-                with c_rep_cicla_txt:
-                    d_rep_cicla = st.text_input("Detalle Repuestos CICLA", placeholder="Ej: 1x Boquilla...")
+                with c_rep_cicla_val: v_rep_cicla = st.number_input("Valor Rep. CICLA ($)", min_value=0, step=1000)
+                with c_rep_cicla_txt: d_rep_cicla = st.text_input("Detalle Repuestos CICLA")
 
-                # Fila 2: Externos
                 c_rep_ext_val, c_rep_ext_txt = st.columns([1, 2])
-                with c_rep_ext_val:
-                    v_rep_ext = st.number_input("Valor Rep. EXTERNOS ($)", min_value=0, step=1000)
-                with c_rep_ext_txt:
-                    d_rep_ext = st.text_input("Detalle Repuestos EXTERNOS", placeholder="Ej: Compra Casa Royal...")
+                with c_rep_ext_val: v_rep_ext = st.number_input("Valor Rep. EXTERNOS ($)", min_value=0, step=1000)
+                with c_rep_ext_txt: d_rep_ext = st.text_input("Detalle Repuestos EXTERNOS")
 
                 st.markdown("---")
-                
-                # --- SECCIÓN MANO DE OBRA ---
                 st.markdown("### 🛠️ Mano de Obra")
                 
                 costo_previo_str = str(datos_ticket.get('Costo', '0')).replace('$','').replace('.','')
@@ -142,23 +125,18 @@ if buscar or numero_caso:
                 except: costo_previo = 0
                 
                 c_man1, c_man2 = st.columns(2)
-                with c_man1:
-                    v_mantencion = st.number_input("Mantenimiento ($)", min_value=0, step=1000)
-                with c_man2:
-                    v_reparacion = st.number_input("Reparación ($)", value=costo_previo, min_value=0, step=1000)
+                with c_man1: v_mantencion = st.number_input("Mantenimiento ($)", min_value=0, step=1000)
+                with c_man2: v_reparacion = st.number_input("Reparación ($)", value=costo_previo, min_value=0, step=1000)
 
-                # CÁLCULO TOTAL
                 total_calculado = v_rep_cicla + v_rep_ext + v_mantencion + v_reparacion
                 st.metric(label="💵 TOTAL A COBRAR", value=f"${total_calculado:,.0f}")
 
                 st.markdown("---")
-
-                # --- INFORMES TÉCNICOS ---
                 st.markdown("### 📋 Informe Técnico")
                 
                 diag_previo = str(datos_ticket.get('Diagnostico Final', ''))
-                nuevo_diag = st.text_area("Diagnóstico Inicial / Problema Reportado", value=diag_previo, height=100)
-                detalle_tecnico = st.text_area("Detalle del Trabajo Realizado (Técnico)", placeholder="Describe la solución aplicada...", height=100)
+                nuevo_diag = st.text_area("Diagnóstico Inicial / Problema", value=diag_previo, height=100)
+                detalle_tecnico = st.text_area("Trabajo Realizado (Técnico)", height=100)
 
                 st.markdown("---")
                 avisar = st.checkbox("📧 Enviar notificación al cliente", value=True)
@@ -167,23 +145,17 @@ if buscar or numero_caso:
             if btn_guardar:
                 msg = st.empty()
                 msg.info("⏳ Guardando...")
-                
                 try:
-                    # Construir Texto Repuestos
                     texto_repuestos = ""
-                    if v_rep_cicla > 0 or d_rep_cicla:
-                        texto_repuestos += f"CICLA: {d_rep_cicla} (${v_rep_cicla}) "
+                    if v_rep_cicla > 0 or d_rep_cicla: texto_repuestos += f"CICLA: {d_rep_cicla} (${v_rep_cicla}) "
                     if v_rep_ext > 0 or d_rep_ext:
                         if texto_repuestos: texto_repuestos += "| "
                         texto_repuestos += f"EXTERNO: {d_rep_ext} (${v_rep_ext}) "
                     texto_repuestos += f"| [MO: Mant ${v_mantencion} + Rep ${v_reparacion}]"
 
-                    # Construir Informe
                     texto_informe = nuevo_diag
-                    if detalle_tecnico:
-                        texto_informe += f"\n\n--- TRABAJO REALIZADO ---\n{detalle_tecnico}"
+                    if detalle_tecnico: texto_informe += f"\n\n--- TRABAJO REALIZADO ---\n{detalle_tecnico}"
 
-                    # Guardar
                     hoja.update_cell(num_fila_excel, 11, nuevo_estado)
                     hoja.update_cell(num_fila_excel, 12, texto_informe)
                     hoja.update_cell(num_fila_excel, 13, texto_repuestos)
@@ -198,12 +170,9 @@ if buscar or numero_caso:
                     msg.success(f"✅ ¡Guardado! Total: ${total_calculado:,.0f}")
                     time.sleep(1.5)
                     st.rerun()
-                    
                 except Exception as e:
                     msg.error(f"❌ Error al guardar: {e}")
-
         else:
             st.warning(f"🔍 No existe el ticket {id_buscado}")
-            
     except Exception as e:
         st.error(f"Error: {e}")
