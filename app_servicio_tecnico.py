@@ -77,6 +77,9 @@ if buscar or numero_caso:
         datos = hoja.get_all_records()
         df = pd.DataFrame(datos)
         
+        # Limpieza de columnas
+        df.columns = [c.strip() for c in df.columns]
+
         if 'ID_TICKET' not in df.columns:
             st.error("⚠️ Error: No encuentro la columna 'ID_TICKET'.")
             st.stop()
@@ -87,27 +90,59 @@ if buscar or numero_caso:
             num_fila_excel = int(fila_encontrada.index[0] + 2)
             datos_ticket = fila_encontrada.iloc[0]
 
-            st.info(f"📂 Caso: {id_buscado} | Cliente: {datos_ticket.get('Nombre del Cliente:', '---')}")
+            # --- RECUPERAR DATOS EXACTOS DEL FORMULARIO ---
+            # Usamos los nombres TAL CUAL están en tu archivo CSV
+            col_cliente = 'Nombre del Cliente:'
+            col_modelo = 'Modelo:'
+            col_problema = 'Descripción del problema: (Opcional) "Detalla qué le pasa al equipo según el cliente"'
+            col_accesorios = 'Accesorios o componentes que trae:'
+            col_telefono = 'Teléfono:'
+
+            nombre_cliente = str(datos_ticket.get(col_cliente, '---'))
+            equipo_cliente = str(datos_ticket.get(col_modelo, '---'))
+            problema_cliente = str(datos_ticket.get(col_problema, 'Sin detalles'))
+            accesorios_cliente = str(datos_ticket.get(col_accesorios, '---'))
+            telefono_cliente = str(datos_ticket.get(col_telefono, '---'))
+
+            st.info(f"📂 Editando Ticket: **{id_buscado}**")
 
             with st.form("form_tecnico"):
-                # --- CORRECCIÓN INTELIGENTE DE ESTADO ---
+                
+                # === SECCIÓN DATOS DE INGRESO (SOLO LECTURA) ===
+                st.markdown("### 📥 Datos de Ingreso (Cliente)")
+                
+                c_info1, c_info2 = st.columns(2)
+                with c_info1:
+                    st.text_input("Cliente", value=nombre_cliente, disabled=True)
+                    st.text_input("Teléfono", value=telefono_cliente, disabled=True)
+                with c_info2:
+                    st.text_input("Equipo", value=equipo_cliente, disabled=True)
+                    st.text_input("Accesorios", value=accesorios_cliente, disabled=True)
+                
+                st.write("🔻 **Problema Reportado:**")
+                st.info(problema_cliente) # Usamos info para resaltarlo en azul/gris
+                
+                st.markdown("---")
+                # ==============================================
+
+                # --- GESTIÓN TÉCNICA ---
+                st.markdown("### 🔧 Gestión Técnica")
+                
                 estados = ["Ingresado", "En Revisión", "Presupuesto/Diagnóstico Enviado", 
                            "Esperando Repuestos", "En Mantención", "Listo para Retiro", "Entregado"]
                 
-                # Leemos lo que hay en Excel
                 raw_estado = str(datos_ticket.get('Estado', '')).strip()
-                
-                # SI ESTÁ VACÍO (Nuevo caso) -> Asumimos "Ingresado"
+                # Corrección para estados vacíos
                 if raw_estado == "" or raw_estado not in estados:
                     estado_actual = "Ingresado"
                 else:
                     estado_actual = raw_estado
                 
                 idx_estado = estados.index(estado_actual)
-                nuevo_estado = st.selectbox("Estado del Equipo", estados, index=idx_estado)
+                nuevo_estado = st.selectbox("Estado Actual", estados, index=idx_estado)
 
                 st.markdown("---")
-                st.markdown("### 💰 Repuestos y Costos")
+                st.markdown("### 💰 Costos")
                 
                 c_rep_cicla_val, c_rep_cicla_txt = st.columns([1, 2])
                 with c_rep_cicla_val: v_rep_cicla = st.number_input("Valor Rep. CICLA ($)", min_value=0, step=1000)
@@ -118,7 +153,6 @@ if buscar or numero_caso:
                 with c_rep_ext_txt: d_rep_ext = st.text_input("Detalle Repuestos EXTERNOS")
 
                 st.markdown("---")
-                st.markdown("### 🛠️ Mano de Obra")
                 
                 costo_previo_str = str(datos_ticket.get('Costo', '0')).replace('$','').replace('.','')
                 try: costo_previo = int(costo_previo_str)
@@ -135,8 +169,8 @@ if buscar or numero_caso:
                 st.markdown("### 📋 Informe Técnico")
                 
                 diag_previo = str(datos_ticket.get('Diagnostico Final', ''))
-                nuevo_diag = st.text_area("Diagnóstico Inicial / Problema", value=diag_previo, height=100)
-                detalle_tecnico = st.text_area("Trabajo Realizado (Técnico)", height=100)
+                nuevo_diag = st.text_area("Diagnóstico Técnico (Informe)", value=diag_previo, height=100)
+                detalle_tecnico = st.text_area("Trabajo Realizado (Interno)", height=100)
 
                 st.markdown("---")
                 avisar = st.checkbox("📧 Enviar notificación al cliente", value=True)
